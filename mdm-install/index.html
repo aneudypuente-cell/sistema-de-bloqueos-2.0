@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AnCar MDM — Instalación</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:680px;margin:0 auto;padding:32px 20px;text-align:center;background:#f6f7f9;color:#15171a}
+.card{background:#fff;border-radius:18px;padding:28px;box-shadow:0 8px 30px #00000012}
+h1{margin-bottom:8px}.muted{color:#626872}.qr{width:280px;max-width:80%;margin:22px auto;display:block}
+.btn{display:inline-block;padding:14px 22px;border-radius:10px;background:#111;color:#fff;text-decoration:none;font-weight:700}
+.hash{font:12px ui-monospace,monospace;word-break:break-all;background:#f0f1f3;padding:12px;border-radius:8px;text-align:left}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>AnCar MDM</h1>
+<p class="muted">Instalación segura del agente MDM</p>
+<img class="qr" id="qr" alt="Código QR de instalación">
+<a class="btn" id="download" href="/mdm-install/MDM-AntiSuspension.apk">Descargar APK</a>
+<p class="muted">Escanea el QR desde el teléfono que vas a registrar.</p>
+<div class="hash"><strong>SHA-256</strong><br><span id="sha">Se actualizará con cada versión.</span></div>
+</div>
+<script>
+const url=new URL('/mdm-install/MDM-AntiSuspension.apk',location.origin).href;
+document.getElementById('qr').src='https://quickchart.io/qr?text='+encodeURIComponent(url)+'&size=560';
+document.getElementById('download').href=url;
+</script>
+</body>
+</html>
