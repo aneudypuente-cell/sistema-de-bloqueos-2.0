@@ -1,6 +1,8 @@
 name: MDM Anti-Suspension Build
 
 on:
+  push:
+    branches: [mdm-anti-suspension]
   workflow_dispatch:
 
 jobs:
@@ -8,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -18,45 +19,48 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android tooling
+      - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip wget
           wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar -O apktool.jar
-          wget -q https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip -O jadx.zip
-          unzip -q jadx.zip -d jadx
+          wget -q https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar -O uber-apk-signer.jar
 
       - name: Decode APK
-        run: |
-          mkdir -p work
-          java -jar apktool.jar d MDM.apk -o work/apktool --force
+        run: java -jar apktool.jar d MDM.apk -o work/apktool --force
 
-      - name: Patch manifest for anti-suspension
+      - name: Patch battery permissions
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path("work/apktool/AndroidManifest.xml")
           s=p.read_text()
-          if "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" not in s:
-              s=s.replace("<uses-permission", '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission', 1)
-          if "android.permission.RECEIVE_BOOT_COMPLETED" not in s:
-              s=s.replace("<uses-permission", '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission', 1)
+          perms=[
+            "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+            "android.permission.RECEIVE_BOOT_COMPLETED"
+          ]
+          marker="<uses-permission"
+          for perm in perms:
+            if perm not in s:
+              s=s.replace(marker, f'<uses-permission android:name="{perm}" />\n    {marker}', 1)
           p.write_text(s)
           PY
 
-      - name: Rebuild APK
-        run: |
-          java -jar apktool.jar b work/apktool -o MDM-AntiSuspension-unsigned.apk
+      - name: Rebuild
+        run: java -jar apktool.jar b work/apktool -o MDM-AntiSuspension-unsigned.apk
 
-      - name: Generate build report
-        run: |
-          sha256sum MDM.apk MDM-AntiSuspension-unsigned.apk > SHA256.txt
-          ls -lh MDM.apk MDM-AntiSuspension-unsigned.apk
+      - name: Sign
+        run: java -jar uber-apk-signer.jar --apks MDM-AntiSuspension-unsigned.apk --out signed
 
-      - name: Upload APK artifact
+      - name: Validate
+        run: |
+          test -s signed/MDM-AntiSuspension-unsigned-aligned-debugSigned.apk
+          sha256sum MDM.apk signed/*.apk > SHA256.txt
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MDM-AntiSuspension-unsigned
+          name: MDM-AntiSuspension
           path: |
-            MDM-AntiSuspension-unsigned.apk
+            signed/*.apk
             SHA256.txt
