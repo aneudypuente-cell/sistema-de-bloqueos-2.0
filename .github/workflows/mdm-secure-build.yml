@@ -16,52 +16,59 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android tooling
+      - name: Install tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget
+          sudo apt-get install -y wget unzip
           wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar -O apktool.jar
-          wget -q https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar -O signer.jar
-      - name: Verify source APK
-        run: |
-          test -s MDM.apk
-          sha256sum MDM.apk
-      - name: Decode APK
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline.zip
+          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          unzip -q cmdline.zip -d "$HOME/android-sdk/cmdline-tools"
+          mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
+          export ANDROID_HOME="$HOME/android-sdk"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/35.0.0:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "build-tools;35.0.0"
+      - name: Verify source
+        run: test -s MDM.apk && sha256sum MDM.apk
+      - name: Decode
         run: java -jar apktool.jar d MDM.apk -o work --force
-      - name: Verify MDM components
+      - name: Verify MDM
         run: |
           grep -Ril "DeviceAdminReceiver\|DevicePolicyManager\|FirebaseMessagingService" work/smali* work/AndroidManifest.xml 2>/dev/null | head -50
           test -f work/res/xml/device_admin_receiver.xml
-      - name: Patch battery and boot permissions safely
+      - name: Patch manifest
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
           p=Path("work/AndroidManifest.xml")
           s=p.read_text()
-          marker='android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
-          if marker not in s:
-              s=s.replace('</manifest>', '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n</manifest>')
-          marker='android.permission.RECEIVE_BOOT_COMPLETED'
-          if marker not in s:
-              s=s.replace('</manifest>', '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n</manifest>')
+          for perm in ("android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS","android.permission.RECEIVE_BOOT_COMPLETED"):
+              if perm not in s:
+                  s=s.replace("</manifest>", f'    <uses-permission android:name="{perm}" />\n</manifest>')
+          m=re.search(r'android:versionCode="(\d+)"',s)
+          if not m: raise SystemExit("versionCode missing")
+          n=int(m.group(1))+1
+          s=s[:m.start(1)]+str(n)+s[m.end(1):]
           p.write_text(s)
+          print("versionCode ->",n)
           PY
-          grep -q 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' work/AndroidManifest.xml
-          grep -q 'android.permission.RECEIVE_BOOT_COMPLETED' work/AndroidManifest.xml
       - name: Rebuild
         run: java -jar apktool.jar b work -o MDM-AnCar-Secure-unsigned.apk
-      - name: Sign
+      - name: Sign release APK
         run: |
-          mkdir -p signed
-          java -jar signer.jar --apks MDM-AnCar-Secure-unsigned.apk --out signed
-          APK=$(find signed -type f -name '*.apk' | head -1)
-          test -s "$APK"
-          sha256sum MDM.apk "$APK" > SHA256.txt
-      - name: Upload APK
+          export ANDROID_HOME="$HOME/android-sdk"
+          export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
+          keytool -genkeypair -v -keystore release.jks -alias ancar -keyalg RSA -keysize 4096 -validity 10000 -storepass changeit -keypass changeit -dname "CN=AnCar Global Tech,O=AnCar,C=DO"
+          apksigner sign --ks release.jks --ks-pass pass:changeit --key-pass pass:changeit --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out MDM-AnCar-Secure.apk MDM-AnCar-Secure-unsigned.apk
+          apksigner verify --verbose --print-certs MDM-AnCar-Secure.apk
+          zipalign -c -P 4 -v 4 MDM-AnCar-Secure.apk
+          sha256sum MDM.apk MDM-AnCar-Secure.apk > SHA256.txt
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: MDM-AnCar-Secure
+          name: MDM-AnCar-Secure-Release
           path: |
-            signed/*.apk
+            MDM-AnCar-Secure.apk
             SHA256.txt
