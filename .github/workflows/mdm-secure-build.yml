@@ -22,25 +22,33 @@ jobs:
           sudo apt-get install -y wget
           wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar -O apktool.jar
           wget -q https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar -O signer.jar
-      - name: Verify source
-        run: test -s MDM.apk && sha256sum MDM.apk
-      - name: Decode
-        run: java -jar apktool.jar d MDM.apk -o work --force
-      - name: Verify existing device-admin implementation
+      - name: Verify source APK
         run: |
-          grep -Ril "DeviceAdminReceiver\|DevicePolicyManager" work/smali* work/AndroidManifest.xml work/res/xml 2>/dev/null | head -30
+          test -s MDM.apk
+          sha256sum MDM.apk
+      - name: Decode APK
+        run: java -jar apktool.jar d MDM.apk -o work --force
+      - name: Verify MDM components
+        run: |
+          grep -Ril "DeviceAdminReceiver\|DevicePolicyManager\|FirebaseMessagingService" work/smali* work/AndroidManifest.xml 2>/dev/null | head -50
           test -f work/res/xml/device_admin_receiver.xml
-      - name: Preserve and patch manifest permissions
+      - name: Patch battery and boot permissions safely
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path("work/AndroidManifest.xml")
           s=p.read_text()
-          for perm in ["android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS","android.permission.RECEIVE_BOOT_COMPLETED"]:
-              if perm not in s:
-                  s=s.replace("<uses-permission", f'<uses-permission android:name="{perm}" />\n    <uses-permission', 1)
+          marker='android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
+          if marker not in s:
+              s=s.replace('</manifest>', '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n</manifest>')
+          marker='android.permission.RECEIVE_BOOT_COMPLETED'
+          if marker not in s:
+              s=s.replace('</manifest>', '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n</manifest>')
           p.write_text(s)
           PY
+          grep -q 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' work/AndroidManifest.xml
+          grep -q 'android.permission.RECEIVE_BOOT_COMPLETED' work/AndroidManifest.xml
       - name: Rebuild
         run: java -jar apktool.jar b work -o MDM-AnCar-Secure-unsigned.apk
       - name: Sign
@@ -50,7 +58,8 @@ jobs:
           APK=$(find signed -type f -name '*.apk' | head -1)
           test -s "$APK"
           sha256sum MDM.apk "$APK" > SHA256.txt
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: MDM-AnCar-Secure
           path: |
