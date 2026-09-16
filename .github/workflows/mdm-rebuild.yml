@@ -1,0 +1,62 @@
+name: MDM Anti-Suspension Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip wget
+          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar -O apktool.jar
+          wget -q https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip -O jadx.zip
+          unzip -q jadx.zip -d jadx
+
+      - name: Decode APK
+        run: |
+          mkdir -p work
+          java -jar apktool.jar d MDM.apk -o work/apktool --force
+
+      - name: Patch manifest for anti-suspension
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("work/apktool/AndroidManifest.xml")
+          s=p.read_text()
+          if "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" not in s:
+              s=s.replace("<uses-permission", '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission', 1)
+          if "android.permission.RECEIVE_BOOT_COMPLETED" not in s:
+              s=s.replace("<uses-permission", '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission', 1)
+          p.write_text(s)
+          PY
+
+      - name: Rebuild APK
+        run: |
+          java -jar apktool.jar b work/apktool -o MDM-AntiSuspension-unsigned.apk
+
+      - name: Generate build report
+        run: |
+          sha256sum MDM.apk MDM-AntiSuspension-unsigned.apk > SHA256.txt
+          ls -lh MDM.apk MDM-AntiSuspension-unsigned.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MDM-AntiSuspension-unsigned
+          path: |
+            MDM-AntiSuspension-unsigned.apk
+            SHA256.txt
